@@ -1,5 +1,5 @@
 
-function Format-ADFName {
+function global:Format-ADFName {
     param (
         [parameter(Mandatory = $true)] [String] $RawValue
     )
@@ -10,7 +10,7 @@ function Format-ADFName {
     return $CleanName
 }
 
-function Format-ADFType {
+function global:Format-ADFType {
     param (
         [parameter(Mandatory = $true)] [String] $RawValue
     )
@@ -21,7 +21,7 @@ function Format-ADFType {
     return $CleanName
 }
 
-Function Format-ADFDependencyMD {
+Function global:Format-ADFDependencyMD {
     [CmdletBinding()]
     Param (
         [Parameter(Mandatory = $True, ValueFromPipeLine = $True)]
@@ -29,7 +29,7 @@ Function Format-ADFDependencyMD {
     )
 
     Process {
-        ForEach ($input in $ResourceDepends){
+        ForEach($input in $ResourceDepends){
 
             $depResource = Format-ADFName -RawValue $input #[regex]::Matches($dep, "\, '\/(.*)'\)]").Groups[1].Value
             $file, $header = $depResource.split('/')
@@ -43,7 +43,7 @@ Function Format-ADFDependencyMD {
 #* Testing
 #$resource.dependsOn | Format-ADFDependencyMD
 
-function Get-ADFMetadata {
+function global:Get-ADFMetadata {
     param (
         [Parameter(Mandatory = $True)]
         [String]$Path,
@@ -73,7 +73,7 @@ function Get-ADFMetadata {
         
         Write-Verbose "$($resources.count) resources found in ARM Template"
         #Run through each resource
-        foreach ($resource in $resources) {
+        ForEach($resource in $resources) {
 
             #* Testing
             # $resource = $resources[0]
@@ -106,7 +106,7 @@ function Get-ADFMetadata {
 #     # $adfPipeline = $Temp[0]
 #     # $activity = $adfPipeline.properties.activities[0]
 
-#     foreach ($activity in $PipelineObject.properties.activities) {
+#     ForEach($activity in $PipelineObject.properties.activities) {
 #         #Name
 #         #description
 #         #type
@@ -114,18 +114,18 @@ function Get-ADFMetadata {
 #         #Policy (only on some)
 #         #typeProperties
 #         #linkedServiceName (only on some)
-#         #! Handle nested activities inside foreach's etc???
+#         #! Handle nested activities inside ForEach-Object's etc???
 #             if ($activity.typeProperties.activities.count -gt 0){
                 
 #                 for($i = 0; $i -le $activity.typeProperties.activities.count; $i++){ #This will show zero for non-relevant activities
 #                     #$activity.typeProperties.activities[$i]
                     
-#                     Expand-JSONObject $activity.typeProperties.activities[$i]
+#                     ConvertTo-FlatObject $activity.typeProperties.activities[$i]
 #                 }
 #             }
 
 #         # $activity.dependsOn.Count # Get count of dependencies we need to change to URLs
-#         # $activityDetail = Expand-JSONObject $activity
+#         # $activityDetail = ConvertTo-FlatObject $activity
 
 #         #Hyperlink dependencies
 #         # if($activityDetail -match 'dependsOn'){
@@ -140,57 +140,44 @@ Function Get-IfConditionActivities {
     #Break out nested activity details 
 }
 
-Function Get-ForEachActivities {
+Function Get-ForEach-ObjectActivities {
     #Break out nested activity details
 }
 
-Function Expand-JSONObject { 
-
-    [CmdletBinding()]
-    Param (
-        [Parameter(ValueFromPipeline = $True)]
-        [Object[]]$Objects,
-        [String]$Separator = ".", 
-        [ValidateSet("", 0, 1)]$Base = 1, 
-        [Int]$Depth = 6, 
-        [Int]$Uncut = 1,
-        [String[]]$ToString = ([String], [DateTime], [TimeSpan]), 
-        [String[]]$Path = @()
+Function global:ConvertTo-FlatObject { #Ref: https://powersnippets.com/convertto-flatobject/
+    [CmdletBinding()]Param (									# Version 02.00.16, by iRon
+        [Parameter(ValueFromPipeLine = $True)][Object[]]$Objects,
+        [String]$Separator = ".", [ValidateSet("", 0, 1)]$Base = 1, [Int]$Depth = 5, [Int]$Uncut = 1,
+        [String[]]$ToString = ([String], [DateTime], [TimeSpan], [Version], [Enum]), [String[]]$Path = @()
     )
 
-    $PipeLine = $Input | ForEach-Object { $_ }; If ($PipeLine) { $Objects = $PipeLine }
-    
+    $PipeLine = $Input | ForEach-Object {$_}; If ($PipeLine) {$Objects = $PipeLine}
     If (@(Get-PSCallStack)[1].Command -eq $MyInvocation.MyCommand.Name -or @(Get-PSCallStack)[1].Command -eq "<position>") {
         $Object = @($Objects)[0]; $Iterate = New-Object System.Collections.Specialized.OrderedDictionary
-        If ($ToString | Where-Object { $Object -is $_ }) { $Object = $Object.ToString() }
-        ElseIf ($Depth) {
-            $Depth--
+        If ($ToString | Where-Object {$Object -is $_}) {$Object = $Object.ToString()}
+        ElseIf ($Depth) {$Depth--
             If ($Object.GetEnumerator.OverloadDefinitions -match "[\W]IDictionaryEnumerator[\W]") {
                 $Iterate = $Object
-            }
-            ElseIf ($Object.GetEnumerator.OverloadDefinitions -match "[\W]IEnumerator[\W]") {
-                $Object.GetEnumerator() | ForEach-Object -Begin { $i = $Base } { $Iterate.($i) = $_; $i += 1 }
-            }
-            Else {
-                $Names = If ($Uncut) { $Uncut-- } Else { $Object.PSStandardMembers.DefaultDisplayPropertySet.ReferencedPropertyNames }
-                If (!$Names) { $Names = $Object.PSObject.Properties | Where-Object { $_.IsGettable } | Select-Object -Expand Name }
-                If ($Names) { $Names | ForEach-Object { $Iterate.$_ = $Object.$_ } }
+            } ElseIf ($Object.GetEnumerator.OverloadDefinitions -match "[\W]IEnumerator[\W]") {
+                $Object.GetEnumerator() | ForEach-Object -Begin {$i = $Base} {$Iterate.($i) = $_; $i += 1}
+            } Else {
+                $Names = If ($Uncut) {$Uncut--} Else {$Object.PSStandardMembers.DefaultDisplayPropertySet.ReferencedPropertyNames}
+                If (!$Names) {$Names = $Object.PSObject.Properties | Where-Object {$_.IsGettable} | Select-Object -Expand Name}
+                If ($Names) {$Names | ForEach-Object {$Iterate.$_ = $Object.$_}}
             }
         }
         If (@($Iterate.Keys).Count) {
             $Iterate.Keys | ForEach-Object {
-                Expand-JSONObject @(, $Iterate.$_) $Separator $Base $Depth $Uncut $ToString ($Path + $_)
+                Flatten-Object @(,$Iterate.$_) $Separator $Base $Depth $Uncut $ToString ($Path + $_)
             }
-        }
-        Else { $Property.(($Path | Where-Object { $_ }) -Join $Separator) = $Object }
-    }
-    ElseIf ($Objects -ne $Null) {
-        @($Objects) | ForEach-Object -Begin { $Output = @(); $Names = @() } {
+        }  Else {$Property.(($Path | Where-Object {$_}) -Join $Separator) = $Object}
+    } ElseIf ($Objects -ne $Null) {
+        @($Objects) | ForEach-Object -Begin {$Output = @(); $Names = @()} {
             New-Variable -Force -Option AllScope -Name Property -Value (New-Object System.Collections.Specialized.OrderedDictionary)
-            Expand-JSONObject @(, $_) $Separator $Base $Depth $Uncut $ToString $Path
+            Flatten-Object @(,$_) $Separator $Base $Depth $Uncut $ToString $Path
             $Output += New-Object PSObject -Property $Property
             $Names += $Output[-1].PSObject.Properties | Select-Object -Expand Name
         }
         $Output | Select-Object ([String[]]($Names | Select-Object -Unique))
     }
-}
+}; Set-Alias Flatten ConvertTo-FlatObject

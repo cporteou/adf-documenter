@@ -34,7 +34,7 @@ Document "linkedServices" {
 
                 Section 'Other Properties' {
                     #Break out all properties
-                    Expand-JSONObject $resource.properties | Table
+                    ConvertTo-FlatObject $resource.properties | Table
                     
                 }
                 
@@ -68,7 +68,7 @@ Document "datasets" {
 
                 Section 'Other Properties' {
                     #Break out all properties
-                    Expand-JSONObject $resource.properties | Table
+                    ConvertTo-FlatObject $resource.properties | Table
 
                 }
             } 
@@ -103,7 +103,7 @@ Document "integrationRuntimes" {
 
                 Section 'Other Properties' {
                     #Break out all properties
-                    Expand-JSONObject $resource.properties | Table
+                    ConvertTo-FlatObject $resource.properties | Table
 
                 }
             } 
@@ -137,7 +137,7 @@ Document "triggers" {
                 
                 Section 'Other Properties' {
                     #Break out all properties
-                    Expand-JSONObject $resource.properties | Table
+                    ConvertTo-FlatObject $resource.properties | Table
 
                 }
             } 
