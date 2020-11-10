@@ -1,0 +1,1380 @@
+{
+	"$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+	"contentVersion": "1.0.0.0",
+	"parameters": {
+		"factoryName": {
+			"type": "string",
+			"metadata": "Data Factory name",
+			"defaultValue": "test-datafactory"
+		},
+		"LS_MSQL_SpartanReporting_connectionString": {
+			"type": "secureString",
+			"metadata": "Secure string for 'connectionString' of 'LS_MSQL_Reporting'"
+		},
+		"AGKDVTSTDataEngVault_properties_typeProperties_baseUrl": {
+			"type": "string",
+			"defaultValue": "https://TEST-DataEngVault.vault.azure.net/"
+		},
+		"LS_ASQL_AnalyticsMetadata_properties_typeProperties_connectionString_secretName": {
+			"type": "string",
+			"defaultValue": "k-conn-asql-test-metadatauser"
+		},
+		"LS_MSQL_SpartanReporting_properties_typeProperties_userName": {
+			"type": "string",
+			"defaultValue": "test\\SVC_test_LV"
+		},
+		"ls_adls_aggrekodatalake_properties_typeProperties_url": {
+			"type": "string",
+			"defaultValue": "https://testdatalake.dfs.core.windows.net"
+		},
+		"ls_pgre_zoomcallrec_eu_properties_typeProperties_connectionString_secretName": {
+			"type": "string",
+			"defaultValue": "k-conn-test-eu"
+		}
+	},
+	"variables": {
+		"factoryId": "[concat('Microsoft.DataFactory/factories/', parameters('factoryName'))]"
+	},
+	"resources": [
+		{
+			"name": "[concat(parameters('factoryName'), '/pl_data_test_fullload_landing')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "ForEachTable",
+						"description": "Loop through each active table",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "GetMetadata",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('GetMetadata').output.value",
+								"type": "Expression"
+							},
+							"activities": [
+								{
+									"name": "Copy data",
+									"description": "Copy tables from test databases to JSON format in the test landing container in ADLS",
+									"type": "Copy",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "0.02:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"source": {
+											"type": "SqlServerSource",
+											"queryTimeout": "02:00:00",
+											"partitionOption": "None"
+										},
+										"sink": {
+											"type": "JsonSink",
+											"storeSettings": {
+												"type": "AzureBlobFSWriteSettings",
+												"maxConcurrentConnections": 20,
+												"blockSizeInMB": 4
+											},
+											"formatSettings": {
+												"type": "JsonWriteSettings"
+											}
+										},
+										"enableStaging": false,
+										"dataIntegrationUnits": 2
+									},
+									"inputs": [
+										{
+											"referenceName": "ds_msql_testReporting",
+											"type": "DatasetReference",
+											"parameters": {
+												"tablename": {
+													"value": "@{item().TableName}",
+													"type": "Expression"
+												},
+												"schemaname": {
+													"value": "@{item().SchemaName}",
+													"type": "Expression"
+												},
+												"databasename": {
+													"value": "@{item().DatabaseName}",
+													"type": "Expression"
+												}
+											}
+										}
+									],
+									"outputs": [
+										{
+											"referenceName": "ds_json_test_landing",
+											"type": "DatasetReference",
+											"parameters": {
+												"tablename": {
+													"value": "@{item().tablename}",
+													"type": "Expression"
+												},
+												"extractdate": {
+													"value": "@variables('ExtractDate')",
+													"type": "Expression"
+												}
+											}
+										}
+									]
+								},
+								{
+									"name": "UpdateLastLoad",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "Copy data",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "0.01:00:00",
+										"retry": 3,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[dbo].[sp_test_landing_update_values]",
+										"storedProcedureParameters": {
+											"lastLoad": {
+												"value": {
+													"value": "@utcnow()",
+													"type": "Expression"
+												},
+												"type": "DateTime"
+											},
+											"tablename": {
+												"value": {
+													"value": "@item().tablename",
+													"type": "Expression"
+												},
+												"type": "String"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "LS_ASQL_testMetadata",
+										"type": "LinkedServiceReference"
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "GetMetadata",
+						"description": "Get the test data source metadata from the metadata database. Restricted to just tables marked as Active ",
+						"type": "Lookup",
+						"dependsOn": [
+							{
+								"activity": "SetExtractDate",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.01:00:00",
+							"retry": 3,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "AzureSqlSource",
+								"sqlReaderQuery": "SELECT DatabaseName, SchemaName, TableName FROM dbo.test_raw_bronze_metadata WHERE Active = 1",
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "ds_asql_testMetadata",
+								"type": "DatasetReference",
+								"parameters": {}
+							},
+							"firstRowOnly": false
+						}
+					},
+					{
+						"name": "LogStart",
+						"description": "Generic logging of pipeline start and end to the metadata database",
+						"type": "SqlServerStoredProcedure",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "0.01:00:00",
+							"retry": 3,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"storedProcedureName": "[[dbo].[adf_log_start]",
+							"storedProcedureParameters": {
+								"pipeline_name": {
+									"value": {
+										"value": "@pipeline().Pipeline",
+										"type": "Expression"
+									},
+									"type": "String"
+								},
+								"run_ID": {
+									"value": {
+										"value": "@pipeline().RunId",
+										"type": "Expression"
+									},
+									"type": "Guid"
+								},
+								"trigger_name": {
+									"value": {
+										"value": "@pipeline().TriggerName",
+										"type": "Expression"
+									},
+									"type": "String"
+								},
+								"trigger_type": {
+									"value": {
+										"value": "@pipeline().TriggerType",
+										"type": "Expression"
+									},
+									"type": "String"
+								}
+							}
+						},
+						"linkedServiceName": {
+							"referenceName": "LS_ASQL_testMetadata",
+							"type": "LinkedServiceReference"
+						}
+					},
+					{
+						"name": "LogEnd",
+						"description": "Generic logging of pipeline start and end to the metadata database",
+						"type": "SqlServerStoredProcedure",
+						"dependsOn": [
+							{
+								"activity": "RawBronzePipeline",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.01:00:00",
+							"retry": 3,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"storedProcedureName": "[[dbo].[adf_log_end]",
+							"storedProcedureParameters": {
+								"run_ID": {
+									"value": {
+										"value": "@pipeline().RunId",
+										"type": "Expression"
+									},
+									"type": "Guid"
+								}
+							}
+						},
+						"linkedServiceName": {
+							"referenceName": "LS_ASQL_testMetadata",
+							"type": "LinkedServiceReference"
+						}
+					},
+					{
+						"name": "SetExtractDate",
+						"description": "Set the extract date to be appended to all table files for historical storage.",
+						"type": "SetVariable",
+						"dependsOn": [
+							{
+								"activity": "LogStart",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"variableName": "ExtractDate",
+							"value": {
+								"value": "@utcnow()",
+								"type": "Expression"
+							}
+						}
+					},
+					{
+						"name": "RawBronzePipeline",
+						"description": "Execute the transformation to Raw Bronze pipeline to process the landed tables",
+						"type": "ExecutePipeline",
+						"dependsOn": [
+							{
+								"activity": "ForEachTable",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"pipeline": {
+								"referenceName": "pl_tran_test_to_rawbronze",
+								"type": "PipelineReference"
+							},
+							"waitOnCompletion": false,
+							"parameters": {
+								"ExtractDate": {
+									"value": "@variables('ExtractDate')",
+									"type": "Expression"
+								}
+							}
+						}
+					}
+				],
+				"variables": {
+					"ExtractDate": {
+						"type": "String"
+					}
+				},
+				"folder": {
+					"name": "Data Engineering/test"
+				},
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/ds_asql_testMetadata')]",
+				"[concat(variables('factoryId'), '/linkedServices/LS_ASQL_testMetadata')]",
+				"[concat(variables('factoryId'), '/pipelines/pl_tran_test_to_rawbronze')]",
+				"[concat(variables('factoryId'), '/datasets/ds_msql_testReporting')]",
+				"[concat(variables('factoryId'), '/datasets/ds_json_test_landing')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/pl_tran_test_ey_parquet')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"description": "Converting audit tables to parquet for",
+				"activities": [
+					{
+						"name": "GetTables",
+						"description": "Get table names from metadata db",
+						"type": "Lookup",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "7.00:00:00",
+							"retry": 0,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "AzureSqlSource",
+								"sqlReaderQuery": "SELECT TableName FROM dbo.test_bronze_metadata WHERE Enabled = 1",
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "ds_asql_testMetadata",
+								"type": "DatasetReference",
+								"parameters": {}
+							},
+							"firstRowOnly": false
+						}
+					},
+					{
+						"name": "ForEachTable",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "GetTables",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('GetTables').output.value",
+								"type": "Expression"
+							},
+							"activities": [
+								{
+									"name": "ProcessDelta",
+									"type": "DatabricksNotebook",
+									"dependsOn": [],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"notebookPath": "/Shared/Data Transformations/test/test_Audit_Outputs",
+										"baseParameters": {
+											"table_name": {
+												"value": "@item().tablename",
+												"type": "Expression"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "LS_ADBR_DataEngineering",
+										"type": "LinkedServiceReference"
+									}
+								},
+								{
+									"name": "UpdateMetadataTable",
+									"type": "SqlServerStoredProcedure",
+									"dependsOn": [
+										{
+											"activity": "ProcessDelta",
+											"dependencyConditions": [
+												"Succeeded"
+											]
+										}
+									],
+									"policy": {
+										"timeout": "7.00:00:00",
+										"retry": 0,
+										"retryIntervalInSeconds": 30,
+										"secureOutput": false,
+										"secureInput": false
+									},
+									"userProperties": [],
+									"typeProperties": {
+										"storedProcedureName": "[[dbo].[sp_test_bronze_metadata_update_values]",
+										"storedProcedureParameters": {
+											"tablename": {
+												"value": {
+													"value": "@item().tablename",
+													"type": "Expression"
+												},
+												"type": "String"
+											}
+										}
+									},
+									"linkedServiceName": {
+										"referenceName": "LS_ASQL_testMetadata",
+										"type": "LinkedServiceReference"
+									}
+								}
+							]
+						}
+					}
+				],
+				"concurrency": 1,
+				"folder": {
+					"name": "Data Engineering/test/test audit"
+				},
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/ds_asql_testMetadata')]",
+				"[concat(variables('factoryId'), '/linkedServices/LS_ADBR_DataEngineering')]",
+				"[concat(variables('factoryId'), '/linkedServices/LS_ASQL_testMetadata')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/pl_tran_test_to_rawbronze')]",
+			"type": "Microsoft.DataFactory/factories/pipelines",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"activities": [
+					{
+						"name": "GetMetadata",
+						"description": "Get the test data source metadata from the metadata database. Restricted to just tables marked as Active ",
+						"type": "Lookup",
+						"dependsOn": [
+							{
+								"activity": "Log Start",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.01:00:00",
+							"retry": 3,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"source": {
+								"type": "AzureSqlSource",
+								"sqlReaderQuery": "SELECT SchemaName, TableName, MergeColumns, LoadType, lastappendraw FROM dbo.test_raw_bronze_metadata WHERE Active = 1",
+								"queryTimeout": "02:00:00",
+								"partitionOption": "None"
+							},
+							"dataset": {
+								"referenceName": "ds_asql_testMetadata",
+								"type": "DatasetReference",
+								"parameters": {}
+							},
+							"firstRowOnly": false
+						}
+					},
+					{
+						"name": "ForEachTable",
+						"description": "Loop through each active table",
+						"type": "ForEach",
+						"dependsOn": [
+							{
+								"activity": "GetMetadata",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"userProperties": [],
+						"typeProperties": {
+							"items": {
+								"value": "@activity('GetMetadata').output.value",
+								"type": "Expression"
+							},
+							"activities": [
+								{
+									"name": "IfFirstLoad",
+									"description": "Check if the table LoadType is set to \"Initial\" meaning it is the first load.",
+									"type": "IfCondition",
+									"dependsOn": [],
+									"userProperties": [],
+									"typeProperties": {
+										"expression": {
+											"value": "@equals(item().LoadType, 'INITIAL')",
+											"type": "Expression"
+										},
+										"ifFalseActivities": [
+											{
+												"name": "MergeData",
+												"type": "DatabricksNotebook",
+												"dependsOn": [],
+												"policy": {
+													"timeout": "7.00:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"notebookPath": "/Shared/Data Transformations/test/test_raw_incremental_append",
+													"baseParameters": {
+														"raw_table_name": {
+															"value": "@item().tablename",
+															"type": "Expression"
+														},
+														"merge_columns": {
+															"value": "@string(item().MergeColumns)",
+															"type": "Expression"
+														},
+														"schema_file_name_arg": {
+															"value": "@item().tablename",
+															"type": "Expression"
+														},
+														"raw_data_folder_name_arg": {
+															"value": "@item().tablename",
+															"type": "Expression"
+														},
+														"lastappendraw": {
+															"value": "@string(item().LastAppendRaw)",
+															"type": "Expression"
+														},
+														"database_name": "test_raw_bronze_dev_db",
+														"file_to_process": {
+															"value": "@{item().TableName}_@{pipeline().parameters.ExtractDate}.json",
+															"type": "Expression"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "LS_ADBR_DataEngineering",
+													"type": "LinkedServiceReference"
+												}
+											},
+											{
+												"name": "UpdateMetadataTableMerge",
+												"description": "Update metadata for last merge info",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "MergeData",
+														"dependencyConditions": [
+															"Succeeded"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "0.01:00:00",
+													"retry": 3,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[[dbo].[sp_test_raw_bronze_update_values]",
+													"storedProcedureParameters": {
+														"lastappendraw": {
+															"value": {
+																"value": "@activity('MergeData').output.runoutput",
+																"type": "Expression"
+															},
+															"type": "Int64"
+														},
+														"lastupdate": {
+															"value": {
+																"value": "@utcnow()",
+																"type": "Expression"
+															},
+															"type": "DateTime"
+														},
+														"tablename": {
+															"value": {
+																"value": "@item().tablename",
+																"type": "Expression"
+															},
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "LS_ASQL_testMetadata",
+													"type": "LinkedServiceReference"
+												}
+											}
+										],
+										"ifTrueActivities": [
+											{
+												"name": "LoadFullTable",
+												"description": "Execute the notebook to process a full load of the table into the databricks delta table",
+												"type": "DatabricksNotebook",
+												"dependsOn": [],
+												"policy": {
+													"timeout": "0.03:00:00",
+													"retry": 0,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"notebookPath": "/Shared/Data Transformations/test/test_cdc_load",
+													"baseParameters": {
+														"spartan_raw_table_name": {
+															"value": "@item().tablename",
+															"type": "Expression"
+														},
+														"merge_columns": {
+															"value": "@string(item().mergecolumns)",
+															"type": "Expression"
+														},
+														"raw_data_folder_name_arg": {
+															"value": "@item().tablename",
+															"type": "Expression"
+														},
+														"schema_file_name_arg": {
+															"value": "@item().tablename",
+															"type": "Expression"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "LS_ADBR_DataEngineering",
+													"type": "LinkedServiceReference"
+												}
+											},
+											{
+												"name": "UpdateMetadataTable",
+												"description": "Update metadata table with date watermark and lastappendraw info",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "LoadFullTable",
+														"dependencyConditions": [
+															"Succeeded"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "0.01:00:00",
+													"retry": 3,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[[dbo].[sp_test_raw_bronze_update_values]",
+													"storedProcedureParameters": {
+														"lastappendraw": {
+															"value": {
+																"value": "@activity('LoadFullTable').output.runoutput",
+																"type": "Expression"
+															},
+															"type": "Int64"
+														},
+														"lastupdate": {
+															"value": {
+																"value": "@utcnow()",
+																"type": "Expression"
+															},
+															"type": "DateTime"
+														},
+														"tablename": {
+															"value": {
+																"value": "@item().tablename",
+																"type": "Expression"
+															},
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "LS_ASQL_testMetadata",
+													"type": "LinkedServiceReference"
+												}
+											},
+											{
+												"name": "ResetLoadType",
+												"description": "Set the load type to standard \"MERGE\" option now that initial load complete",
+												"type": "SqlServerStoredProcedure",
+												"dependsOn": [
+													{
+														"activity": "UpdateMetadataTable",
+														"dependencyConditions": [
+															"Succeeded"
+														]
+													}
+												],
+												"policy": {
+													"timeout": "0.01:00:00",
+													"retry": 3,
+													"retryIntervalInSeconds": 30,
+													"secureOutput": false,
+													"secureInput": false
+												},
+												"userProperties": [],
+												"typeProperties": {
+													"storedProcedureName": "[[dbo].[sp_reset_loadtype_merge]",
+													"storedProcedureParameters": {
+														"tablename": {
+															"value": {
+																"value": "@item().tablename",
+																"type": "Expression"
+															},
+															"type": "String"
+														},
+														"updatetable": {
+															"value": {
+																"value": "test_raw_bronze_metadata",
+																"type": "Expression"
+															},
+															"type": "String"
+														}
+													}
+												},
+												"linkedServiceName": {
+													"referenceName": "LS_ASQL_testMetadata",
+													"type": "LinkedServiceReference"
+												}
+											}
+										]
+									}
+								}
+							]
+						}
+					},
+					{
+						"name": "Log Start",
+						"description": "Generic logging of pipeline start and end to the metadata database",
+						"type": "SqlServerStoredProcedure",
+						"dependsOn": [],
+						"policy": {
+							"timeout": "0.01:00:00",
+							"retry": 3,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"storedProcedureName": "[[dbo].[adf_log_start]",
+							"storedProcedureParameters": {
+								"pipeline_name": {
+									"value": {
+										"value": "@pipeline().Pipeline",
+										"type": "Expression"
+									},
+									"type": "String"
+								},
+								"run_ID": {
+									"value": {
+										"value": "@pipeline().RunId",
+										"type": "Expression"
+									},
+									"type": "Guid"
+								},
+								"trigger_name": {
+									"value": {
+										"value": "@pipeline().TriggerName",
+										"type": "Expression"
+									},
+									"type": "String"
+								},
+								"trigger_type": {
+									"value": {
+										"value": "@pipeline().TriggerType",
+										"type": "Expression"
+									},
+									"type": "String"
+								}
+							}
+						},
+						"linkedServiceName": {
+							"referenceName": "LS_ASQL_testMetadata",
+							"type": "LinkedServiceReference"
+						}
+					},
+					{
+						"name": "Log End",
+						"description": "Generic logging of pipeline start and end to the metadata database",
+						"type": "SqlServerStoredProcedure",
+						"dependsOn": [
+							{
+								"activity": "ForEachTable",
+								"dependencyConditions": [
+									"Succeeded"
+								]
+							}
+						],
+						"policy": {
+							"timeout": "0.01:00:00",
+							"retry": 3,
+							"retryIntervalInSeconds": 30,
+							"secureOutput": false,
+							"secureInput": false
+						},
+						"userProperties": [],
+						"typeProperties": {
+							"storedProcedureName": "[[dbo].[adf_log_end]",
+							"storedProcedureParameters": {
+								"run_ID": {
+									"value": {
+										"value": "@pipeline().RunId",
+										"type": "Expression"
+									},
+									"type": "Guid"
+								}
+							}
+						},
+						"linkedServiceName": {
+							"referenceName": "LS_ASQL_AnalyticsMetadata",
+							"type": "LinkedServiceReference"
+						}
+					}
+				],
+				"parameters": {
+					"ExtractDate": {
+						"type": "string"
+					}
+				},
+				"folder": {
+					"name": "Data Engineering/spartan"
+				},
+				"annotations": []
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/datasets/ds_asql_testMetadata')]",
+				"[concat(variables('factoryId'), '/linkedServices/LS_ASQL_testMetadata')]",
+				"[concat(variables('factoryId'), '/linkedServices/LS_ADBR_DataEngineering')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ds_asql_testMetadata')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "LS_ASQL_testMetadata",
+					"type": "LinkedServiceReference"
+				},
+				"annotations": [],
+				"type": "AzureSqlTable",
+				"schema": [],
+				"typeProperties": {}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/LS_ASQL_testMetadata')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ds_json_test_landing')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "ls_adls_testdatalake",
+					"type": "LinkedServiceReference"
+				},
+				"parameters": {
+					"tablename": {
+						"type": "string"
+					},
+					"extractdate": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "Json",
+				"typeProperties": {
+					"location": {
+						"type": "AzureBlobFSLocation",
+						"fileName": {
+							"value": "@{dataset().tablename}_@{dataset().extractdate}.json",
+							"type": "Expression"
+						},
+						"folderPath": {
+							"value": "test/landing/test/full/@{dataset().tablename}",
+							"type": "Expression"
+						},
+						"fileSystem": "sandboxes"
+					}
+				},
+				"schema": {
+					"type": "object",
+					"properties": {
+						"commitInfo": {
+							"type": "object",
+							"properties": {
+								"timestamp": {
+									"type": "integer"
+								},
+								"userId": {
+									"type": "string"
+								},
+								"userName": {
+									"type": "string"
+								},
+								"operation": {
+									"type": "string"
+								},
+								"operationParameters": {
+									"type": "object",
+									"properties": {
+										"mode": {
+											"type": "string"
+										},
+										"partitionBy": {
+											"type": "string"
+										}
+									}
+								},
+								"notebook": {
+									"type": "object",
+									"properties": {
+										"notebookId": {
+											"type": "string"
+										}
+									}
+								},
+								"clusterId": {
+									"type": "string"
+								},
+								"isolationLevel": {
+									"type": "string"
+								},
+								"isBlindAppend": {
+									"type": "boolean"
+								}
+							}
+						},
+						"protocol": {
+							"type": "object",
+							"properties": {
+								"minReaderVersion": {
+									"type": "integer"
+								},
+								"minWriterVersion": {
+									"type": "integer"
+								}
+							}
+						},
+						"metaData": {
+							"type": "object",
+							"properties": {
+								"id": {
+									"type": "string"
+								},
+								"format": {
+									"type": "object",
+									"properties": {
+										"provider": {
+											"type": "string"
+										},
+										"options": {
+											"type": "object"
+										}
+									}
+								},
+								"schemaString": {
+									"type": "string"
+								},
+								"partitionColumns": {
+									"type": "array"
+								},
+								"configuration": {
+									"type": "object"
+								},
+								"createdTime": {
+									"type": "integer"
+								}
+							}
+						},
+						"add": {
+							"type": "object",
+							"properties": {
+								"path": {
+									"type": "string"
+								},
+								"partitionValues": {
+									"type": "object"
+								},
+								"size": {
+									"type": "integer"
+								},
+								"modificationTime": {
+									"type": "integer"
+								},
+								"dataChange": {
+									"type": "boolean"
+								},
+								"stats": {
+									"type": "string"
+								}
+							}
+						}
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/ls_adls_testdatalake')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ds_msql_testReporting')]",
+			"type": "Microsoft.DataFactory/factories/datasets",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"linkedServiceName": {
+					"referenceName": "LS_MSQL_testReporting",
+					"type": "LinkedServiceReference",
+					"parameters": {
+						"DatabaseName": {
+							"value": "@dataset().databasename",
+							"type": "Expression"
+						}
+					}
+				},
+				"parameters": {
+					"tablename": {
+						"type": "string"
+					},
+					"schemaname": {
+						"type": "string"
+					},
+					"databasename": {
+						"type": "string"
+					}
+				},
+				"annotations": [],
+				"type": "SqlServerTable",
+				"schema": [],
+				"typeProperties": {
+					"schema": {
+						"value": "@dataset().schemaname",
+						"type": "Expression"
+					},
+					"table": {
+						"value": "@dataset().tablename",
+						"type": "Expression"
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/LS_MSQL_testReporting')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/testDataEngVault')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureKeyVault",
+				"typeProperties": {
+					"baseUrl": "[parameters('testDataEngVault_properties_typeProperties_baseUrl')]"
+				}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/LS_ADBR_DataEngineering')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureDatabricks",
+				"typeProperties": {
+					"domain": "https://westeurope.azuredatabricks.net",
+					"accessToken": {
+						"type": "AzureKeyVaultSecret",
+						"store": {
+							"referenceName": "testDataEngVault",
+							"type": "LinkedServiceReference"
+						},
+						"secretName": "k-tokn-adbr-testdatabricks"
+					},
+					"existingClusterId": "0817-000111-test771"
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/testDataEngVault')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/LS_ASQL_testMetadata')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"description": "test Metadata database ",
+				"annotations": [],
+				"type": "AzureSqlDatabase",
+				"typeProperties": {
+					"connectionString": {
+						"type": "AzureKeyVaultSecret",
+						"store": {
+							"referenceName": "testDataEngVault",
+							"type": "LinkedServiceReference"
+						},
+						"secretName": "[parameters('LS_ASQL_testMetadata_properties_typeProperties_connectionString_secretName')]"
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/testDataEngVault')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/LS_MSQL_testReporting')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"description": "test Reporting DB connection.",
+				"parameters": {
+					"DatabaseName": {
+						"type": "String"
+					}
+				},
+				"annotations": [],
+				"type": "SqlServer",
+				"typeProperties": {
+					"connectionString": "[parameters('LS_MSQL_testReporting_connectionString')]",
+					"userName": "[parameters('LS_MSQL_testReporting_properties_typeProperties_userName')]",
+					"password": {
+						"type": "AzureKeyVaultSecret",
+						"store": {
+							"referenceName": "testDataEngVault",
+							"type": "LinkedServiceReference"
+						},
+						"secretName": "k-pass-msql-test"
+					}
+				},
+				"connectVia": {
+					"referenceName": "ir-selfhosted-testql01",
+					"type": "IntegrationRuntimeReference"
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/integrationRuntimes/ir-selfhosted-testsql01')]",
+				"[concat(variables('factoryId'), '/linkedServices/testDataEngVault')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ls_adls_testdatalake')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "AzureBlobFS",
+				"typeProperties": {
+					"url": "[parameters('ls_adls_aggrekodatalake_properties_typeProperties_url')]",
+					"accountKey": {
+						"type": "AzureKeyVaultSecret",
+						"store": {
+							"referenceName": "testDataEngVault",
+							"type": "LinkedServiceReference"
+						},
+						"secretName": "k-akey-adls-testdatalake"
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/linkedServices/testDataEngVault')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ls_pgre_test_eu')]",
+			"type": "Microsoft.DataFactory/factories/linkedServices",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"type": "PostgreSql",
+				"typeProperties": {
+					"connectionString": {
+						"type": "AzureKeyVaultSecret",
+						"store": {
+							"referenceName": "testDataEngVault",
+							"type": "LinkedServiceReference"
+						},
+						"secretName": "[parameters('ls_pgre_test_eu_properties_typeProperties_connectionString_secretName')]"
+					}
+				},
+				"connectVia": {
+					"referenceName": "ir-selfhosted-test26",
+					"type": "IntegrationRuntimeReference"
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/integrationRuntimes/ir-selfhosted-test26')]",
+				"[concat(variables('factoryId'), '/linkedServices/testDataEngVault')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/Monthly')]",
+			"type": "Microsoft.DataFactory/factories/triggers",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"runtimeState": "Started",
+				"pipelines": [
+					{
+						"pipelineReference": {
+							"referenceName": "pl_tran_test_parquet",
+							"type": "PipelineReference"
+						},
+						"parameters": {}
+					}
+				],
+				"type": "ScheduleTrigger",
+				"typeProperties": {
+					"recurrence": {
+						"frequency": "Month",
+						"interval": 1,
+						"startTime": "2020-09-29T10:15:00.000Z",
+						"timeZone": "UTC",
+						"schedule": {
+							"minutes": [
+								0
+							],
+							"hours": [
+								6
+							],
+							"monthDays": [
+								1
+							]
+						}
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/pipelines/pl_tran_test_parquet')]"
+			]
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ir-selfhosted-test26')]",
+			"type": "Microsoft.DataFactory/factories/integrationRuntimes",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "SelfHosted",
+				"description": "For zoom connectivity",
+				"typeProperties": {}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/ir-selfhosted-testsql01')]",
+			"type": "Microsoft.DataFactory/factories/integrationRuntimes",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"type": "SelfHosted",
+				"description": "Self-hosted IR for DEV/Pre-Live pipelines",
+				"typeProperties": {}
+			},
+			"dependsOn": []
+		},
+		{
+			"name": "[concat(parameters('factoryName'), '/Daily 6AM')]",
+			"type": "Microsoft.DataFactory/factories/triggers",
+			"apiVersion": "2018-06-01",
+			"properties": {
+				"annotations": [],
+				"runtimeState": "Started",
+				"pipelines": [
+					{
+						"pipelineReference": {
+							"referenceName": "pl_data_test_fullload_landing",
+							"type": "PipelineReference"
+						},
+						"parameters": {}
+					}
+				],
+				"type": "ScheduleTrigger",
+				"typeProperties": {
+					"recurrence": {
+						"frequency": "Day",
+						"interval": 1,
+						"startTime": "2020-10-23T06:05:00.000Z",
+						"timeZone": "UTC",
+						"schedule": {
+							"minutes": [
+								0
+							],
+							"hours": [
+								6
+							]
+						}
+					}
+				}
+			},
+			"dependsOn": [
+				"[concat(variables('factoryId'), '/pipelines/pl_data_test_fullload_landing')]"
+			]
+		}
+	]
+}
