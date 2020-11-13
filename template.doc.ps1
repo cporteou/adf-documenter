@@ -7,9 +7,6 @@ Document "readme" {
 
     Title 'Azure Data Factory documentation'
 
-    "[![Build Status](https://dev.azure.com/AggrekoAdvancedAnalytics/Data%20Engineering/_apis/build/status/data-engineering-adf?repoName=data-engineering-adf&branchName=adf_publish)](https://dev.azure.com/AggrekoAdvancedAnalytics/Data%20Engineering/_build/latest?definitionId=56&repoName=data-engineering-adf&branchName=adf_publish)"
-
-    
     $types = $adfArm | Select-Object Type | Sort-Object Type -Unique
 
     Section "Index"{
@@ -29,7 +26,7 @@ Document "linkedServices" {
     "This document describes all published linked services in the $($InputObject.adfInstance) Azure Data Factory resource"
 
     foreach($resource in $adfArm){
-        Section "Linked Service: $($resource.Name)" {
+        Section "$($resource.Name)" {
             Section 'Resource details' -Force {
                 "Description: $($resource.properties.description)"
 
@@ -63,7 +60,7 @@ Document "datasets" {
     "This document describes all published datasets in the $($InputObject.adfInstance) Azure Data Factory resource"
 
     foreach($resource in $adfArm){
-        Section "Dataset: $($resource.Name)" {
+        Section "$($resource.Name)" {
             Section 'Resource details' -Force {
                 "Description: $($resource.properties.Description)"
 
@@ -98,7 +95,7 @@ Document "integrationRuntimes" {
     "This document describes all published runtimes in the $($InputObject.adfInstance) Azure Data Factory resource"
 
     foreach($resource in $adfArm){
-        Section "Integration Runtime: $($resource.Name)" {
+        Section "$($resource.Name)" {
             Section 'Resource details' -Force {
                 "Description: $($resource.properties.Description)"
 
@@ -132,7 +129,7 @@ Document "triggers" {
     "This document describes all published triggers in the $($InputObject.adfInstance) Azure Data Factory resource"
 
     foreach($resource in $adfArm){
-        Section "Trigger: $($resource.Name)" {
+        Section "$($resource.Name)" {
             Section 'Resource details' -Force {
                 "Description: $($resource.properties.Description)"
 
