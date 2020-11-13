@@ -168,13 +168,13 @@ Function global:ConvertTo-FlatObject { #Ref: https://powersnippets.com/convertto
         }
         If (@($Iterate.Keys).Count) {
             $Iterate.Keys | ForEach-Object {
-                Flatten-Object @(,$Iterate.$_) $Separator $Base $Depth $Uncut $ToString ($Path + $_)
+                ConvertTo-FlatObject  @(,$Iterate.$_) $Separator $Base $Depth $Uncut $ToString ($Path + $_)
             }
         }  Else {$Property.(($Path | Where-Object {$_}) -Join $Separator) = $Object}
     } ElseIf ($Objects -ne $Null) {
         @($Objects) | ForEach-Object -Begin {$Output = @(); $Names = @()} {
             New-Variable -Force -Option AllScope -Name Property -Value (New-Object System.Collections.Specialized.OrderedDictionary)
-            Flatten-Object @(,$_) $Separator $Base $Depth $Uncut $ToString $Path
+            ConvertTo-FlatObject @(,$_) $Separator $Base $Depth $Uncut $ToString $Path
             $Output += New-Object PSObject -Property $Property
             $Names += $Output[-1].PSObject.Properties | Select-Object -Expand Name
         }

@@ -1,12 +1,15 @@
-Import-module .\functions.ps1
+Import-module $PSScriptRoot\Functions.ps1 -Force
 
-Document "index" {
+Document "readme" {
 
     # Return all resource types to build index page
     $adfArm = Get-ADFMetadata -Path $InputObject.armTemplate
 
     Title 'Azure Data Factory documentation'
 
+    "[![Build Status](https://dev.azure.com/AggrekoAdvancedAnalytics/Data%20Engineering/_apis/build/status/data-engineering-adf?repoName=data-engineering-adf&branchName=adf_publish)](https://dev.azure.com/AggrekoAdvancedAnalytics/Data%20Engineering/_build/latest?definitionId=56&repoName=data-engineering-adf&branchName=adf_publish)"
+
+    
     $types = $adfArm | Select-Object Type | Sort-Object Type -Unique
 
     Section "Index"{
