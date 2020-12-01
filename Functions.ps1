@@ -33,8 +33,10 @@ Function global:Format-ADFDependencyMD {
 
             $depResource = Format-ADFName -RawValue $input #[regex]::Matches($dep, "\, '\/(.*)'\)]").Groups[1].Value
             $file, $header = $depResource.split('/')
+            if($header -and $file){
             $headerlink = $header -replace "_", "\_"
-            "[$($header)]($($file).md#$($headerlink.ToLower()))"
+            "$($file): [$($header)]($($file).md#$($headerlink.ToLower()))"
+            }
         }
     }
     # return $dependsOnLink

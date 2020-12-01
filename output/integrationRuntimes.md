@@ -1,8 +1,10 @@
-# Azure Data Factory runtime documentation
+# Azure Data Factory Integration Runtime documentation
 
 This document describes all published runtimes in the test-datafactory Azure Data Factory resource
 
-## Integration Runtime: ir-selfhosted-test26
+---
+
+## ir-selfhosted-test26
 
 ### Resource details
 
@@ -18,7 +20,7 @@ SelfHosted | For zoom connectivity |
 
 ---
 
-## Integration Runtime: ir-selfhosted-testsql01
+## ir-selfhosted-testsql01
 
 ### Resource details
 
